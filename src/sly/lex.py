@@ -30,23 +30,34 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
+from __future__ import annotations
 
 __all__ = ['Lexer', 'LexerStateChange']
 
 import re
-import copy
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Self
+
 
 class LexError(Exception):
+    args: tuple[str]
+    text: str
+    error_index: int
+
     '''
     Exception raised if an invalid character is encountered and no default
     error handler function is defined.  The .text attribute of the exception
     contains all remaining untokenized text. The .error_index is the index
     location of the error.
     '''
-    def __init__(self, message, text, error_index):
+
+    def __init__(self, message: str, text: str, error_index: int):
         self.args = (message,)
         self.text = text
         self.error_index = error_index
+
 
 class PatternError(Exception):
     '''
@@ -55,31 +66,39 @@ class PatternError(Exception):
     '''
     pass
 
+
 class LexerBuildError(Exception):
     '''
     Exception raised if there's some sort of problem building the lexer.
     '''
     pass
 
+
 class LexerStateChange(Exception):
     '''
     Exception raised to force a lexing state change
     '''
-    def __init__(self, newstate, tok=None):
+
+    def __init__(self, newstate, tok: str | None = None):
         self.newstate = newstate
         self.tok = tok
+
 
 class Token(object):
     '''
     Representation of a single token.
     '''
     __slots__ = ('type', 'value', 'lineno', 'index', 'end')
+
     def __repr__(self):
         return f'Token(type={self.type!r}, value={self.value!r}, lineno={self.lineno}, index={self.index}, end={self.end})'
 
+
 class TokenStr(str):
-    @staticmethod
-    def __new__(cls, value, key=None, remap=None):
+    key: str | None
+    remap: dict | None
+
+    def __new__(cls, value: str, key: str | None = None, remap: dict | None = None):
         self = super().__new__(cls, value)
         self.key = key
         self.remap = remap
@@ -95,28 +114,32 @@ class TokenStr(str):
         if self.remap is not None:
             self.remap[self.key, key] = self.key
 
+
 class _Before:
     def __init__(self, tok, pattern):
         self.tok = tok
         self.pattern = pattern
 
+
 class LexerMetaDict(dict):
     '''
     Special dictionary that prohibits duplicate definitions in lexer specifications.
     '''
+
     def __init__(self):
-        self.before = { }
-        self.delete = [ ]
-        self.remap = { }
+        super().__init__()
+        self.before = {}
+        self.delete = []
+        self.remap = {}
 
     def __setitem__(self, key, value):
         if isinstance(value, str):
             value = TokenStr(value, key, self.remap)
-            
+
         if isinstance(value, _Before):
             self.before[key] = value.tok
             value = TokenStr(value.pattern, key, self.remap)
-            
+
         if key in self and not isinstance(value, property):
             prior = self[key]
             if isinstance(prior, str):
@@ -140,36 +163,40 @@ class LexerMetaDict(dict):
         else:
             return super().__getitem__(key)
 
+
 class LexerMeta(type):
     '''
     Metaclass for collecting lexing rules
     '''
+
     @classmethod
     def __prepare__(meta, name, bases):
         d = LexerMetaDict()
 
         def _(pattern, *extra):
             patterns = [pattern, *extra]
+
             def decorate(func):
-                pattern = '|'.join(f'({pat})' for pat in patterns )
+                pattern = '|'.join(f'({pat})' for pat in patterns)
                 if hasattr(func, 'pattern'):
                     func.pattern = pattern + '|' + func.pattern
                 else:
                     func.pattern = pattern
                 return func
+
             return decorate
 
         d['_'] = _
         d['before'] = _Before
         return d
 
-    def __new__(meta, clsname, bases, attributes):
+    def __new__(meta, clsname: str, bases: tuple[type, ...], attributes: dict[str, Any]):
         del attributes['_']
         del attributes['before']
 
         # Create attributes for use in the actual class body
-        cls_attributes = { str(key): str(val) if isinstance(val, TokenStr) else val
-                           for key, val in attributes.items() }
+        cls_attributes = {str(key): str(val) if isinstance(val, TokenStr) else val
+                          for key, val in attributes.items()}
         cls = super().__new__(meta, clsname, bases, cls_attributes)
 
         # Attach various metadata to the class
@@ -179,6 +206,7 @@ class LexerMeta(type):
         cls._delete = attributes.delete
         cls._build()
         return cls
+
 
 class Lexer(metaclass=LexerMeta):
     # These attributes may be defined in subclasses
@@ -222,7 +250,7 @@ class Lexer(metaclass=LexerMeta):
         for base in cls.__bases__:
             if isinstance(base, LexerMeta):
                 rules.extend(base._rules)
-                
+
         # Dictionary of previous rules
         existing = dict(rules)
 
@@ -230,7 +258,7 @@ class Lexer(metaclass=LexerMeta):
             if (key in cls._token_names) or key.startswith('ignore_') or hasattr(value, 'pattern'):
                 if callable(value) and not hasattr(value, 'pattern'):
                     raise LexerBuildError(f"function {value} doesn't have a regex pattern")
-                
+
                 if key in existing:
                     # The definition matches something that already existed in the base class.
                     # We replace it, but keep the original ordering
@@ -256,7 +284,7 @@ class Lexer(metaclass=LexerMeta):
                 raise LexerBuildError(f'{key} does not match a name in tokens')
 
         # Apply deletion rules
-        rules = [ (key, value) for key, value in rules if key not in cls._delete ]
+        rules = [(key, value) for key, value in rules if key not in cls._delete]
         cls._rules = rules
 
     @classmethod
@@ -282,7 +310,7 @@ class Lexer(metaclass=LexerMeta):
         remapped_toks = set()
         for d in cls._remapping.values():
             remapped_toks.update(d.values())
-            
+
         undefined = remapped_toks - set(cls._token_names)
         if undefined:
             missing = ', '.join(undefined)
@@ -296,12 +324,16 @@ class Lexer(metaclass=LexerMeta):
                 tokname = tokname[7:]
                 cls._ignored_tokens.add(tokname)
 
+            pattern: str | None = None
+
             if isinstance(value, str):
                 pattern = value
 
             elif callable(value):
                 cls._token_funcs[tokname] = value
                 pattern = getattr(value, 'pattern')
+
+            assert pattern is not None
 
             # Form the regular expression component
             part = f'(?P<{tokname}>{pattern})'
@@ -322,7 +354,7 @@ class Lexer(metaclass=LexerMeta):
             return
 
         # Form the master regular expression
-        #previous = ('|' + cls._master_re.pattern) if cls._master_re else ''
+        # previous = ('|' + cls._master_re.pattern) if cls._master_re else ''
         # cls._master_re = cls.regex_module.compile('|'.join(parts) + previous, cls.reflags)
         cls._master_re = cls.regex_module.compile('|'.join(parts), cls.reflags)
 
@@ -357,7 +389,7 @@ class Lexer(metaclass=LexerMeta):
         '''
         self.begin(self.__state_stack.pop())
 
-    def tokenize(self, text, lineno=1, index=0):
+    def tokenize(self, text: str, lineno: int = 1, index: int = 0):
         _ignored_tokens = _master_re = _ignore = _token_funcs = _literals = _remapping = None
 
         # --- Support for state changes
@@ -375,20 +407,23 @@ class Lexer(metaclass=LexerMeta):
 
         # --- Support for backtracking
         _mark_stack = []
+
         def _mark():
             _mark_stack.append((type(self), index, lineno))
+
         self.mark = _mark
 
         def _accept():
             _mark_stack.pop()
+
         self.accept = _accept
 
         def _reject():
             nonlocal index, lineno
             cls, index, lineno = _mark_stack[-1]
             _set_state(cls)
-        self.reject = _reject
 
+        self.reject = _reject
 
         # --- Main tokenization function
         self.text = text
