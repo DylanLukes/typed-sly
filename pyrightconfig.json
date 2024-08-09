@@ -1,6 +1,0 @@
-{
-  "include": ["src/**/*.py", "tests/**/*.py"],
-  "typeCheckingMode": "strict",
-
-  "reportSelfClsParameterName": "information"
-}

@@ -35,10 +35,12 @@ from __future__ import annotations
 __all__ = ['Lexer', 'LexerStateChange']
 
 import re
-from typing import TYPE_CHECKING
+from re import RegexFlag, Pattern
+from types import ModuleType
+from typing import TYPE_CHECKING, Callable, ClassVar
 
 if TYPE_CHECKING:
-    from typing import Any, Self
+    from typing import Any
 
 
 class LexError(Exception):
@@ -79,7 +81,7 @@ class LexerStateChange(Exception):
     Exception raised to force a lexing state change
     '''
 
-    def __init__(self, newstate, tok: str | None = None):
+    def __init__(self, newstate, tok):
         self.newstate = newstate
         self.tok = tok
 
@@ -89,6 +91,11 @@ class Token(object):
     Representation of a single token.
     '''
     __slots__ = ('type', 'value', 'lineno', 'index', 'end')
+
+    value: str
+    lineno: int
+    index: int
+    end: int
 
     def __repr__(self):
         return f'Token(type={self.type!r}, value={self.value!r}, lineno={self.lineno}, index={self.index}, end={self.end})'
@@ -210,13 +217,13 @@ class LexerMeta(type):
 
 class Lexer(metaclass=LexerMeta):
     # These attributes may be defined in subclasses
-    tokens = set()
-    literals = set()
-    ignore = ''
-    reflags = 0
-    regex_module = re
+    tokens: ClassVar[set[str]] = set()
+    literals: ClassVar[set[str]] = set()
+    ignore: ClassVar[str] = ''
+    reflags: ClassVar[int | re.RegexFlag] = RegexFlag.NOFLAG
+    regex_module: ClassVar[ModuleType] = re
 
-    _token_names = set()
+    _token_names: set[str] = set()
     _token_funcs = {}
     _ignored_tokens = set()
     _remapping = {}
@@ -224,8 +231,13 @@ class Lexer(metaclass=LexerMeta):
     _remap = {}
 
     # Internal attributes
-    __state_stack = None
-    __set_state = None
+    __state_stack: list[LexerMeta] | None = None
+    __set_state: Callable[[LexerMeta], None] | None = None
+
+    # Tokenize method state
+    text: str
+    index: int
+    lineno: int
 
     @classmethod
     def _collect_rules(cls):
@@ -365,7 +377,7 @@ class Lexer(metaclass=LexerMeta):
         if not all(isinstance(lit, str) for lit in cls.literals):
             raise LexerBuildError('literals must be specified as strings')
 
-    def begin(self, cls):
+    def begin(self, cls: LexerMeta):
         '''
         Begin a new lexer state
         '''
@@ -374,7 +386,7 @@ class Lexer(metaclass=LexerMeta):
             self.__set_state(cls)
         self.__class__ = cls
 
-    def push_state(self, cls):
+    def push_state(self, cls: LexerMeta):
         '''
         Push a new lexer state onto the stack
         '''
@@ -387,13 +399,16 @@ class Lexer(metaclass=LexerMeta):
         '''
         Pop a lexer state from the stack
         '''
+        assert self.__state_stack, "pop from empty or missing state stack"
         self.begin(self.__state_stack.pop())
 
     def tokenize(self, text: str, lineno: int = 1, index: int = 0):
-        _ignored_tokens = _master_re = _ignore = _token_funcs = _literals = _remapping = None
+        _master_re: Pattern[str] | None = None
+        _literals: set[str] | None = None
+        _ignored_tokens = _ignore = _token_funcs = _remapping = None
 
         # --- Support for state changes
-        def _set_state(cls):
+        def _set_state(cls: type[Lexer]):
             nonlocal _ignored_tokens, _master_re, _ignore, _token_funcs, _literals, _remapping
             _ignored_tokens = cls._ignored_tokens
             _master_re = cls._master_re
@@ -406,7 +421,7 @@ class Lexer(metaclass=LexerMeta):
         _set_state(type(self))
 
         # --- Support for backtracking
-        _mark_stack = []
+        _mark_stack: list[tuple[LexerMeta, int, int]] = []
 
         def _mark():
             _mark_stack.append((type(self), index, lineno))
@@ -491,5 +506,5 @@ class Lexer(metaclass=LexerMeta):
             self.lineno = lineno
 
     # Default implementations of the error handler. May be changed in subclasses
-    def error(self, t):
+    def error(self, t: Token):
         raise LexError(f'Illegal character {t.value[0]!r} at index {self.index}', t.value, self.index)

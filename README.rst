@@ -1,3 +1,36 @@
+This Fork
+=========
+
+The primary goal of this fork is to create a typed fork of SLY, with no changes to
+functionality, and as lightweight overall changes as possible to facilitate
+rebasing onto whatever upstream changes might come along.
+
+In addition, secondary goals include:
+
+ - Improving test coverage.
+ - Automated testing (CI) with GitHub Actions.
+ - Adding additional explanatory comments to `lex.py` to match the style of `yacc.py`.
+
+Non-goals include:
+
+ - Adding functionality.
+ - Adding dependencies (other than `pyright`).
+ - Changing the build system.
+ - Producing or maintaining a PyPI package for distribution (currently).
+
+Caveat Emptor
+-------------
+
+**This fork is a work in progress and is *not* yet ready for usage.**
+
+The goal of this fork, in line with SLY, is to provide a lightweight, zero-dependency
+library for lexing/parsing in Python one can use to quickly sketch out lexers and parsers
+for small languages or DSLs in prototype, hobby, or educational projects.
+
+For production use, you should probably consider a more robustly maintained
+and featureful library like `lark-parser` or `parsimonious`, or even a
+heavy-duty parser generator like `ANTLR` or `Bison`.
+
 SLY (Sly Lex-Yacc)
 ==================
 
